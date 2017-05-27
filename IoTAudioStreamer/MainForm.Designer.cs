@@ -103,6 +103,7 @@
             this.willReceiveChkBox.TabIndex = 2;
             this.willReceiveChkBox.Text = "Will Receive";
             this.willReceiveChkBox.UseVisualStyleBackColor = true;
+            this.willReceiveChkBox.CheckedChanged += new System.EventHandler(this.checkboxChangedAsync);
             // 
             // willSendChkBox
             // 
@@ -115,6 +116,7 @@
             this.willSendChkBox.TabIndex = 2;
             this.willSendChkBox.Text = "Will Send";
             this.willSendChkBox.UseVisualStyleBackColor = true;
+            this.willSendChkBox.CheckedChanged += new System.EventHandler(this.checkboxChangedAsync);
             // 
             // listenBtn
             // 

@@ -41,11 +41,12 @@ namespace IoTAudioStreamer
         private ProgState _progState = ProgState.NotConnected;
         private bool _sending = false;
         private bool _receiving = false;
-        SslStream _sslClient;
+        private SslStream _sslClient;
         private X509Certificate2 _cert = new X509Certificate2("server.pfx", "IoTBox");
-        MemoryStream _inStream = new MemoryStream();
-        MemoryStream _outStream = new MemoryStream();
+        private MemoryStream _inStream = new MemoryStream();
+        private MemoryStream _outStream = new MemoryStream();
         private LameMP3FileWriter _writer = null;
+        private Thread _audioThread = null;
 
         private static IPAddress GetLocalIPAddress()
         {
@@ -81,7 +82,19 @@ namespace IoTAudioStreamer
 
             while (_progState == ProgState.Connected)
             {
-                await ReceiveDataAsync();
+                try
+                {
+                    await ReceiveDataAsync();
+                }
+                catch (IOException)
+                {
+                    // socket gone
+                    this.Close();
+                }
+                finally
+                {
+                    _audioThread.Abort();
+                }
             }
         }
 
@@ -125,7 +138,14 @@ namespace IoTAudioStreamer
 
             while (_progState == ProgState.Connected)
             {
-                await ReceiveDataAsync();
+                try
+                {
+                    await ReceiveDataAsync();
+                }
+                catch (IOException)
+                {
+                    this.Close();
+                }
             }
         }
 
@@ -143,16 +163,48 @@ namespace IoTAudioStreamer
             if (_progState == ProgState.Connected)
             {
                 _receiving = receiveChkBox.Checked && willSendChkBox.Checked;
+                if (_receiving && _audioThread == null)
+                {
+                    _audioThread = new Thread(new ThreadStart(PlayAudio));
+                    _audioThread.Start();
+                }
+                else if (_audioThread != null)
+                {
+                    _audioThread.Abort();
+                    _audioThread = null;
+                }
+
                 _sending = sendChkBox.Checked && willReceiveChkBox.Checked;
                 if (_sending)
                 {
                     StartSendingAudio();
                 }
-                else
+                await SendData(receiveChkBox.Checked, sendChkBox.Checked, null);
+            }
+        }
+
+        private void PlayAudio()
+        {
+            while (_inStream.Length < 2000)
+                Thread.Sleep(100);
+
+            _inStream.Position = 0;
+            using (WaveStream blockAlignedStream = new BlockAlignReductionStream(
+                WaveFormatConversionStream.CreatePcmStream(new Mp3FileReader(_inStream))))
+            {
+                using (WaveOut waveOut = new WaveOut(WaveCallbackInfo.FunctionCallback()))
                 {
-                    await SendData(receiveChkBox.Checked, sendChkBox.Checked, null);
+                    waveOut.Init(blockAlignedStream);
+                    waveOut.Play();
+                    Console.WriteLine("starting playback");
+                    while (waveOut.PlaybackState == PlaybackState.Playing)
+                    {
+                        Thread.Sleep(100);
+                    }
+                    Console.WriteLine("stopping playback");
                 }
             }
+
         }
 
         private async void StartSendingAudio()
@@ -160,22 +212,29 @@ namespace IoTAudioStreamer
             if (_writer != null)
                 return;
             var waveIn = new WasapiLoopbackCapture();
-            _writer = new LameMP3FileWriter(_outStream, waveIn.WaveFormat, LAMEPreset.EXTREME_FAST);
-            waveIn.DataAvailable += OnDataAvailable;
-            waveIn.StartRecording();
-
-            while (_progState == ProgState.Connected && _sending)
+            using (_writer = new LameMP3FileWriter(_outStream, waveIn.WaveFormat, 320))
             {
-                _outStream.Position = 0;
-                byte[] mp3Data = new byte[32768];
-                int bytesRead = await _outStream.ReadAsync(mp3Data, 0, mp3Data.Length);
-                _outStream.SetLength(0);
-                if (bytesRead == 0)
-                    await SendData(receiveChkBox.Checked, sendChkBox.Checked, null);
-                else
-                    await SendData(receiveChkBox.Checked, sendChkBox.Checked, 
-                        mp3Data.Take(bytesRead).ToArray());
+                waveIn.DataAvailable += OnDataAvailable;
+                waveIn.StartRecording();
+
+                while (_progState == ProgState.Connected && _sending)
+                {
+                    while (_outStream.Length < 4196)
+                        await Task.Delay(100);
+
+                    _outStream.Position = 0;
+                    byte[] mp3Data = new byte[32768];
+                    int bytesRead = await _outStream.ReadAsync(mp3Data, 0, mp3Data.Length);
+                    _outStream.SetLength(0);
+                    _outStream.Position = 0;
+
+                    if (bytesRead != 0)
+                        await SendData(receiveChkBox.Checked, sendChkBox.Checked,
+                            mp3Data.Take(bytesRead).ToArray());
+                }
             }
+            waveIn.StopRecording();
+            waveIn.DataAvailable -= OnDataAvailable;
         }
 
         private void OnDataAvailable(object sender, WaveInEventArgs e)
@@ -195,9 +254,7 @@ namespace IoTAudioStreamer
                 totalLen += bytesRead;
 
                 if (Encoding.UTF8.GetString(buffer.Take(totalLen).ToArray()).Contains("<EOF>"))
-                {
                     break;
-                }
             }
 
             if (bytesRead < 0)
@@ -216,8 +273,10 @@ namespace IoTAudioStreamer
 
             if (resp.Mp3Data != null)
             {
-                outputTxtBox.AppendText("Got MP3(?) data\r\n");
-                // TODO: handle audio
+                var pos = _inStream.Position;
+                _inStream.Position = _inStream.Length;
+                await _inStream.WriteAsync(resp.Mp3Data, 0, resp.Mp3Data.Length);
+                _inStream.Position = pos;
             }
         }
 
@@ -233,7 +292,9 @@ namespace IoTAudioStreamer
                 Mp3Data = mp3Data
             });
             await _sslClient.WriteAsync(buffer, 0, buffer.Length);
-            outputTxtBox.AppendText(String.Format("wrote {0} bytes\r\n", buffer.Length));
+            if (mp3Data != null)
+                outputTxtBox.AppendText(String.Format("wrote {0} bytes\r\n", buffer.Length));
+            //await Task.Delay(5); // slow everything down
         }
     }
 
