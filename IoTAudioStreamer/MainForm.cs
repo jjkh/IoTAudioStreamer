@@ -79,22 +79,22 @@ namespace IoTAudioStreamer
             sendChkBox.Enabled = true;
             willReceiveChkBox.Enabled = true;
             willSendChkBox.Enabled = true;
-
-            while (_progState == ProgState.Connected)
+            try
             {
-                try
+                while (_progState == ProgState.Connected)
                 {
+
                     await ReceiveDataAsync();
                 }
-                catch (IOException)
-                {
-                    // socket gone
-                    this.Close();
-                }
-                finally
-                {
-                    _audioThread.Abort();
-                }
+            }
+            catch (IOException)
+            {
+                // socket gone
+                this.Close();
+            }
+            finally
+            {
+                _audioThread.Abort();
             }
         }
 
@@ -136,16 +136,20 @@ namespace IoTAudioStreamer
             willReceiveChkBox.Enabled = true;
             willSendChkBox.Enabled = true;
 
-            while (_progState == ProgState.Connected)
+            try
             {
-                try
+                while (_progState == ProgState.Connected)
                 {
                     await ReceiveDataAsync();
                 }
-                catch (IOException)
-                {
-                    this.Close();
-                }
+            }
+            catch (IOException)
+            {
+                this.Close();
+            }
+            finally
+            {
+                _audioThread.Abort();
             }
         }
 
@@ -185,7 +189,7 @@ namespace IoTAudioStreamer
 
         private void PlayAudio()
         {
-            while (_inStream.Length < 2000)
+            while (_inStream.Length < 20000)
                 Thread.Sleep(100);
 
             _inStream.Position = 0;
@@ -196,15 +200,14 @@ namespace IoTAudioStreamer
                 {
                     waveOut.Init(blockAlignedStream);
                     waveOut.Play();
-                    Console.WriteLine("starting playback");
+                    //outputTxtBox.AppendText("starting playback\r\n");
                     while (waveOut.PlaybackState == PlaybackState.Playing)
                     {
                         Thread.Sleep(100);
                     }
-                    Console.WriteLine("stopping playback");
+                    //outputTxtBox.AppendText("stopping playback\r\n");
                 }
             }
-
         }
 
         private async void StartSendingAudio()
@@ -212,7 +215,7 @@ namespace IoTAudioStreamer
             if (_writer != null)
                 return;
             var waveIn = new WasapiLoopbackCapture();
-            using (_writer = new LameMP3FileWriter(_outStream, waveIn.WaveFormat, 320))
+            using (_writer = new LameMP3FileWriter(_outStream, waveIn.WaveFormat, 128))
             {
                 waveIn.DataAvailable += OnDataAvailable;
                 waveIn.StartRecording();
