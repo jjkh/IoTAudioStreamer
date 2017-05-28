@@ -189,23 +189,26 @@ namespace IoTAudioStreamer
 
         private void PlayAudio()
         {
-            while (_inStream.Length < 20000)
-                Thread.Sleep(100);
-
-            _inStream.Position = 0;
-            using (WaveStream blockAlignedStream = new BlockAlignReductionStream(
-                WaveFormatConversionStream.CreatePcmStream(new Mp3FileReader(_inStream))))
+            while (_receiving)
             {
-                using (WaveOut waveOut = new WaveOut(WaveCallbackInfo.FunctionCallback()))
+                while (_inStream.Length < 4000)
+                    Thread.Sleep(100);
+
+                _inStream.Position = 0;
+                using (WaveStream blockAlignedStream = new BlockAlignReductionStream(
+                    WaveFormatConversionStream.CreatePcmStream(new Mp3FileReader(_inStream))))
                 {
-                    waveOut.Init(blockAlignedStream);
-                    waveOut.Play();
-                    //outputTxtBox.AppendText("starting playback\r\n");
-                    while (waveOut.PlaybackState == PlaybackState.Playing)
+                    using (WaveOut waveOut = new WaveOut(WaveCallbackInfo.FunctionCallback()))
                     {
-                        Thread.Sleep(100);
+                        waveOut.Init(blockAlignedStream);
+                        waveOut.Play();
+                        while (waveOut.PlaybackState == PlaybackState.Playing)
+                        {
+                            Thread.Sleep(100);
+                        }
                     }
-                    //outputTxtBox.AppendText("stopping playback\r\n");
+                    _inStream.SetLength(0);
+                    _inStream.Position = 0;
                 }
             }
         }
@@ -215,7 +218,7 @@ namespace IoTAudioStreamer
             if (_writer != null)
                 return;
             var waveIn = new WasapiLoopbackCapture();
-            using (_writer = new LameMP3FileWriter(_outStream, waveIn.WaveFormat, 128))
+            using (_writer = new LameMP3FileWriter(_outStream, waveIn.WaveFormat, LAMEPreset.ABR_256))
             {
                 waveIn.DataAvailable += OnDataAvailable;
                 waveIn.StartRecording();
